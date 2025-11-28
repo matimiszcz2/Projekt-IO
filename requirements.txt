@@ -1,0 +1,30 @@
+# --- Framework backendu ---
+Flask==3.0.2
+Flask-CORS==4.0.0
+Flask-Migrate==4.0.5
+
+
+# --- Baza danych ---
+SQLAlchemy==2.0.25
+Flask-SQLAlchemy==3.1.1
+
+# --- Obsługa środowiska (np. .env) ---
+python-dotenv==1.0.1
+
+# --- Obsługa obrazów ---
+Pillow==10.2.0
+
+# --- Rozpoznawanie twarzy ---
+# face_recognition==1.3.0
+# dlib==19.24.2
+#
+# #--- OpenCV (kamera + kadry z wideo) ---
+# opencv-python==4.9.0.80
+
+# --- QR kody (generowanie i skanowanie) ---
+# qrcode==7.4.2
+# pyzbar==0.1.9
+
+# --- Przydatne narzędzia ---
+numpy==1.26.4
+requests==2.31.0
