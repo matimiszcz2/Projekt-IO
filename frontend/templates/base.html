@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skaner QR + FaceID</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background: #f0f2f5;
+        }
+
+        #qr-reader {
+            width: 100%;
+            max-width: 500px;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        #status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            width: 100%;
+            max-width: 470px;
+            text-align: center;
+            font-weight: bold;
+            background: #fff;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .info {
+            color: #007bff;
+            border-left: 5px solid #007bff;
+        }
+
+        .success {
+            color: #28a745;
+            border-left: 5px solid #28a745;
+        }
+
+        .error {
+            color: #dc3545;
+            border-left: 5px solid #dc3545;
+        }
+
+        .processing {
+            color: #ffc107;
+            border-left: 5px solid #ffc107;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Weryfikacja Pracownika</h1>
+
+    <div id="qr-reader"></div>
+
+    <div id="status" class="info">Zeskanuj kod QR, aby rozpocząć...</div>
+
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="../js/main.js"></script>
+
+</body>
+
+</html>
