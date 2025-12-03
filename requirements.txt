@@ -1,7 +1,7 @@
 # --- Framework backendu ---
 Flask==3.0.2
 Flask-CORS==4.0.0
-Flask-Migrate==4.0.5
+Flask-Migrate==4.0.4
 
 
 # --- Baza danych ---
