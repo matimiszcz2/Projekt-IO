@@ -1,107 +1,108 @@
 // --- KONFIGURACJA ---
-const API_URL = '/api/verify';  // Adres Twojego serwera Flask
+const API_QR_URL = '/api/check-qr';
+const API_FACE_URL = '/api/verify-face';
 const SCANNER_ID = 'qr-reader';
-let scanner = null; // Zmienna globalna przechowująca instancję skanera
 
-// --- FUNKCJE POMOCNICZE ---
+let scanner = null;
+let isProcessing = false;
 
-// Aktualizacja paska statusu
 function updateStatus(message, type) {
     const statusEl = document.getElementById('status');
     statusEl.innerText = message;
-    statusEl.className = type; // klasy: info, success, error, processing
+    statusEl.className = type;
 }
 
-// Funkcja robiąca zdjęcie z elementu <video> skanera
 function captureImageFromVideo() {
-    // 1. Znajdujemy element wideo wewnątrz biblioteki html5-qrcode
     const videoElement = document.querySelector(`#${SCANNER_ID} video`);
+    if (!videoElement) throw new Error("Brak wideo.");
 
-    if (!videoElement) {
-        throw new Error("Nie znaleziono strumienia wideo.");
-    }
-
-    // 2. Tworzymy wirtualne płótno (canvas)
     const canvas = document.createElement("canvas");
     canvas.width = videoElement.videoWidth;
     canvas.height = videoElement.videoHeight;
-
-    // 3. Rysujemy aktualną klatkę wideo na płótnie
     const ctx = canvas.getContext("2d");
     ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-
-    // 4. Zamieniamy na format Base64 (JPG jakość 80%)
-    return canvas.toDataURL("image/jpeg", 0.8);
+    return canvas.toDataURL("image/jpeg", 0.85); // Jakość 85%
 }
 
-// --- GŁÓWNA LOGIKA ---
-
-// Funkcja obsługująca proces po wykryciu kodu
 async function handleScanSuccess(decodedText, decodedResult) {
-    // A. Zatrzymujemy obraz (PAUZA), żeby użytkownik wiedział, że skanowanie się udało
-    // i żeby zdjęcie nie było rozmazane.
-    if (scanner) {
-        scanner.pause();
-    }
-
-    updateStatus("Kod QR przyjęty. Weryfikacja twarzy...", "processing");
+    if (isProcessing) return;
+    isProcessing = true;
 
     try {
-        // B. Pobieramy zdjęcie z zamrożonego wideo
-        const imageBase64 = captureImageFromVideo();
+        // --- ETAP 1: ZDJĘCIE KODU QR ---
+        updateStatus("Wykryto kod. Przetwarzanie...", "processing");
 
-        // C. Wysyłamy dane do serwera (Backend Python)
-        const response = await fetch(API_URL, {
+        // 1. Robimy zdjęcie MOMENTALNIE po wykryciu kodu (na zdjęciu będzie widać kod QR)
+        const qrImageBase64 = captureImageFromVideo();
+
+        // 2. Wysyłamy kod + zdjęcie kodu do sprawdzenia
+        const responseQr = await fetch(API_QR_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 qr_code: decodedText,
-                image: imageBase64
+                image_qr: qrImageBase64
             })
         });
 
-        const result = await response.json();
+        const resultQr = await responseQr.json();
 
-        // D. Obsługa odpowiedzi
-        if (result.status === 'granted') {
-            const userName = result.user_name || "Pracowniku";
-            updateStatus(`SUKCES! Witaj, ${userName}.`, "success");
+        if (resultQr.status !== 'valid') {
+            throw new Error(resultQr.message);
+        }
+
+        // --- ETAP 2: ZDJĘCIE TWARZY ---
+
+        // 3. Dajemy użytkownikowi czas na zabranie kodu i ustawienie twarzy
+        updateStatus("Kod OK. SPÓJRZ W KAMERĘ!", "info");
+
+        // Czekamy 2 sekundy (możesz zmienić czas tutaj)
+        await new Promise(r => setTimeout(r, 2000));
+
+        // 4. Robimy DRUGIE zdjęcie (teraz powinna być sama twarz)
+        updateStatus("Weryfikacja twarzy...", "processing");
+        const faceImageBase64 = captureImageFromVideo();
+
+        // 5. Wysyłamy do weryfikacji biometrycznej
+        const responseFace = await fetch(API_FACE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                qr_code: decodedText,
+                image_face: faceImageBase64
+            })
+        });
+
+        const resultFace = await responseFace.json();
+
+        if (resultFace.status === 'granted') {
+            updateStatus(`OTWARTE: Witaj, ${resultFace.user_name}!`, "success");
+            if (scanner) scanner.pause();
+            setTimeout(() => resetScanner(), 5000);
         } else {
-            updateStatus(`ODMOWA: ${result.message || "Nie rozpoznano twarzy"}`, "error");
+            throw new Error(resultFace.message || "Twarz nierozpoznana");
         }
 
     } catch (err) {
         console.error(err);
-        updateStatus("Błąd połączenia z serwerem.", "error");
+        updateStatus(`BŁĄD: ${err.message}`, "error");
+        setTimeout(() => resetScanner(), 3000);
     }
-
-    // E. Restart skanera po 4 sekundach (aby można było zeskanować kolejną osobę)
-    setTimeout(() => {
-        if (scanner) {
-            scanner.resume(); // Wznawia podgląd z kamery
-            updateStatus("Gotowy do skanowania...", "info");
-        }
-    }, 4000);
 }
 
-// --- INICJALIZACJA ---
+function resetScanner() {
+    isProcessing = false;
+    updateStatus("Gotowy. Zeskanuj kod QR.", "info");
+    if (scanner && scanner.getState() === Html5QrcodeScannerState.PAUSED) {
+        scanner.resume();
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Tworzymy instancję skanera z domyślnym UI
     scanner = new Html5QrcodeScanner(
         SCANNER_ID,
-        {
-            fps: 10,                 // Klatki na sekundę
-            qrbox: { width: 250, height: 250 }, // Obszar skanowania
-            aspectRatio: 1.0,
-            showTorchButtonIfSupported: true
-        },
-        /* verbose= */ false
+        { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+        false
     );
-
-    // Uruchamiamy renderowanie
-    scanner.render(handleScanSuccess, (errorMessage) => {
-        // Callback błędów skanowania (wywoływany ciągle, gdy nie widzi kodu)
-        // Ignorujemy go, żeby nie zaśmiecać konsoli
-    });
+    scanner.render(handleScanSuccess, (er) => { });
 });
