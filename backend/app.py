@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_migrate import Migrate
 from flask_cors import CORS
 from database import db
@@ -8,7 +8,9 @@ import os
 import base64
 import numpy as np
 import cv2
+import uuid
 from datetime import datetime
+
 
 
 def create_app():
@@ -21,9 +23,15 @@ def create_app():
     # konfiguracja bazy danych (SQLite dla łatwości)
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["SECRET_KEY"] = "super-secret-key"
+
 
     db.init_app(app)
     Migrate(app, db)
+
+    with app.app_context():
+        db.create_all()
+                        
 
     @app.route("/")
     def index():
@@ -87,6 +95,7 @@ def check_qr():
 
     # 2. Logika biznesowa
     user = fake_database.get(qr_code)
+    #user = Employee.query.filter_by(qr_value = qr_code).first()
     
     if not user:
         return jsonify({"status": "denied", "message": "Nieznany kod QR"})
@@ -146,7 +155,15 @@ def verify_face():
         if result['verified']:
             user = fake_database.get(qr_code)
             print(f"Sukces! Dystans: {result['distance']}")
-            return jsonify({"status": "granted", "user_name": user['name']})
+            #if user.get('is_admin') == True:
+            #    session["is_admin"] == True
+            #else:
+            #    session["is_admin"] == False
+            if user['name'] == 'Anna Nowak':
+                session["is_admin"] = True
+            return jsonify({"status": "granted", "user_name": user['name'], "is_admin":session.get("is_admin")})
+            
+            
         else:
             print(f"Odmowa. Dystans: {result['distance']}")
             return jsonify({"status": "denied", "message": "Twarz niezgodna z wzorcem."})
@@ -154,6 +171,96 @@ def verify_face():
     except Exception as e:
         print(f"Błąd serwera: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/admin/reject", methods=["POST"])
+def reject_admin():
+    session.pop("is_admin", None)
+    return jsonify({"status": "revoked"})
+
+
+@app.route("/admin")
+def admin():
+    if session.get("is_admin"):
+        return render_template("admin.html")
+    else:
+        return redirect(url_for("index"))
+
+@app.route("/admin/users")
+def admin_users():
+    if not session.get("is_admin"):
+        return redirect(url_for("index"))
+    # przykładowe dane użytkowników
+    users_list = Employee.query.all()
+    
+    return render_template("users.html", users=users_list)
+
+
+@app.route("/admin/users/toggle-admin", methods=["POST"])
+def toggle_admin():
+    if not session.get("is_admin"):
+        return jsonify({"message": "Brak uprawnień"}), 403
+
+    data = request.get_json()
+    user = Employee.query.get(data["user_id"])
+
+    if not user:
+        return jsonify({"message": "Użytkownik nie istnieje"}), 404
+
+    user.is_admin = not user.is_admin
+    db.session.commit()
+
+    return jsonify({
+        "message": f"Zmieniono uprawnienia admina dla {user.imie} {user.nazwisko}",
+        "is_admin": user.is_admin
+    })
+
+@app.route("/admin/users/add", methods=["POST"])
+def add_user():
+    print("SESSION is_admin =", session.get("is_admin"))
+
+    if not session.get("is_admin"):
+        return jsonify({"status": "error", "message": "Brak uprawnień"}), 403
+
+    data = request.get_json()
+
+    new_employee = Employee(
+        imie=data["imie"],
+        nazwisko=data["nazwisko"],
+        stanowisko=data["stanowisko"],
+        is_admin=data["is_admin"],
+        photo_hash="TEMP",
+        qr_value=str(uuid.uuid4())
+    )
+
+    db.session.add(new_employee)
+    db.session.commit()
+    print("ZAPISANO DO BAZY:", new_employee.id)
+
+    return jsonify({"status": "ok"})
+
+@app.route("/admin/users/delete", methods=["POST"])
+def delete_user():
+
+    if not session.get("is_admin"):
+        return jsonify({"status": "error", "message": "Brak uprawnień"}), 403
+
+    data = request.get_json()
+    user = Employee.query.get(data["user_id"])
+
+    if not user:
+        return jsonify({"message": "Użytkownik nie istnieje"}), 404
+    db.session.delete(user)
+    db.session.commit()
+    print("usunięto:", user.id)
+
+
+    return jsonify({
+        "status": "ok",
+        "message": f"usunieto {user.imie} {user.nazwisko}",
+    })
+
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)

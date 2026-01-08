@@ -78,7 +78,8 @@ async function handleScanSuccess(decodedText, decodedResult) {
         if (resultFace.status === 'granted') {
             updateStatus(`OTWARTE: Witaj, ${resultFace.user_name}!`, "success");
             if (scanner) scanner.pause();
-            setTimeout(() => resetScanner(), 5000);
+            // 🔹 POKAŻ MODAL
+            if (resultFace.is_admin) showAccessModal(resultFace.user_name);
         } else {
             throw new Error(resultFace.message || "Twarz nierozpoznana");
         }
@@ -97,6 +98,181 @@ function resetScanner() {
         scanner.resume();
     }
 }
+
+function showAccessModal(userName) {
+    document.getElementById("modalMessage").innerText =
+        "Witaj " + userName + "!";
+
+    const modalElement = document.getElementById("accessModal");
+    const modal = new bootstrap.Modal(modalElement, {
+        backdrop: "static",   // nie zamyka kliknięciem tła
+        keyboard: false       // nie zamyka ESC
+    });
+
+    modal.show();
+
+    // TAK → admin
+    document.getElementById("goAdminBtn").onclick = function () {
+        window.location.href = "/admin";
+    };
+
+    // NIE → zamknij modal + reset skanera
+    modalElement.addEventListener("hidden.bs.modal", () => {
+        resetScanner();
+    }, { once: true });
+}
+document.addEventListener("DOMContentLoaded", () => {
+    const rejectBtn = document.getElementById("reject-btn");
+    console.log("Przycisk reject-btn:", rejectBtn);
+
+    if (!rejectBtn) return; // brak przycisku → nic nie robimy
+
+    rejectBtn.addEventListener("click", () => {
+        fetch("/admin/reject", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            /*alert("Uprawnienia admina cofnięte!"); */
+            window.location.href = "/";
+        })
+        .catch(err => console.error(err));
+    });
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+
+    /* =========================
+       MODAL: DODAJ UŻYTKOWNIKA
+       ========================= */
+
+    const addUserBtn = document.getElementById("addUserBtn");
+    const addUserModalEl = document.getElementById("addUserModal");
+    const addUserModal = new bootstrap.Modal(addUserModalEl);
+
+    const saveUserBtn = document.getElementById("saveUserBtn");
+
+    addUserBtn.addEventListener("click", () => {
+        addUserModal.show();
+    });
+
+    saveUserBtn.addEventListener("click", () => {
+    const imie = document.getElementById("addImie").value.trim();
+    const nazwisko = document.getElementById("addNazwisko").value.trim();
+    const stanowisko = document.getElementById("addStanowisko").value.trim();
+    const isAdmin = document.getElementById("addIsAdmin").checked;
+
+    if (!imie || !nazwisko || !stanowisko) {
+        alert("Uzupełnij wszystkie pola");
+        return;
+    }
+
+    fetch("/admin/users/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            imie,
+            nazwisko,
+            stanowisko,
+            is_admin: isAdmin
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === "ok") {
+            addUserModal.hide();     // ✅ ZAMYKA MODAL
+            location.reload();      // ✅ ODŚWIEŻA LISTĘ
+        } else {
+            alert(data.message || "Błąd dodawania użytkownika");
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert("Błąd serwera");
+    });
+});
+
+
+
+    /* =========================
+       MODAL: ZARZĄDZAJ UŻYTKOWNIKIEM
+       ========================= */
+
+    const manageModalEl = document.getElementById("manageModal");
+    const manageModal = new bootstrap.Modal(manageModalEl);
+
+    const modalUserName = document.getElementById("modalUserName");
+    const toggleAdminBtn = document.getElementById("toggleAdminBtn");
+    const deleteUserBtn = document.getElementById("deleteUserBtn");
+
+    let selectedUserId = null;
+    let selectedUserIsAdmin = false;
+
+    document.querySelectorAll(".manage-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            selectedUserId = btn.dataset.id;
+            selectedUserIsAdmin = btn.dataset.admin === "true";
+
+            modalUserName.textContent = btn.dataset.name;
+            toggleAdminBtn.textContent = selectedUserIsAdmin
+                ? "Odbierz uprawnienia admina"
+                : "Nadaj uprawnienia admina";
+            deleteUserBtn.textContent = "Usuń użytkownika";
+            manageModal.show();
+        });
+    });
+
+    toggleAdminBtn.addEventListener("click", () => {
+        fetch("/admin/users/toggle-admin", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                user_id: selectedUserId
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.message) {
+                // wszystko ok, reload lub toast
+                //alert(data.message);
+                location.reload();
+            } else {
+                alert("Błąd operacji");
+            }
+        })
+        .catch(err => console.error(err));
+    });
+
+     deleteUserBtn.addEventListener("click", () => {
+        fetch("/admin/users/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                user_id: selectedUserId
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.message) {
+                // wszystko ok, reload lub toast
+                //alert(data.message);
+                location.reload();
+            } else {
+                alert("Błąd operacji");
+            }
+        })
+        .catch(err => console.error(err));
+    });
+
+
+});
+
+
+
+
 
 document.addEventListener('DOMContentLoaded', () => {
     scanner = new Html5QrcodeScanner(
