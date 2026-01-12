@@ -77,9 +77,19 @@ async function handleScanSuccess(decodedText, decodedResult) {
 
         if (resultFace.status === 'granted') {
             updateStatus(`OTWARTE: Witaj, ${resultFace.user_name}!`, "success");
-            if (scanner) scanner.pause();
+            //
+            if (!resultFace.is_admin) {
+                scanner.pause();
+                setTimeout(() => resetScanner(), 3000);
+            }
             // 🔹 POKAŻ MODAL
-            if (resultFace.is_admin) showAccessModal(resultFace.user_name);
+           // if (!resultFace.is_admin) setTimeout(() => resetScanner(), 3000);
+;
+            if (resultFace.is_admin) {
+                scanner.pause();
+                showAccessModal(resultFace.user_name);
+            }
+                
         } else {
             throw new Error(resultFace.message || "Twarz nierozpoznana");
         }
@@ -207,20 +217,30 @@ document.addEventListener("DOMContentLoaded", () => {
     const modalUserName = document.getElementById("modalUserName");
     const toggleAdminBtn = document.getElementById("toggleAdminBtn");
     const deleteUserBtn = document.getElementById("deleteUserBtn");
-
+    const deactivateEmployeeBtn = document.getElementById("deactivateEmployeeBtn");
     let selectedUserId = null;
     let selectedUserIsAdmin = false;
+    let selectedUserIsActive = false;
 
     document.querySelectorAll(".manage-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             selectedUserId = btn.dataset.id;
             selectedUserIsAdmin = btn.dataset.admin === "true";
+            selectedUserIsActive = btn.dataset.active === "true";
+
+
 
             modalUserName.textContent = btn.dataset.name;
+            
+            deactivateEmployeeBtn.textContent = selectedUserIsActive
+                ? "Dezaktywuj"
+                : "Aktywuj";
+           
             toggleAdminBtn.textContent = selectedUserIsAdmin
                 ? "Odbierz uprawnienia admina"
                 : "Nadaj uprawnienia admina";
             deleteUserBtn.textContent = "Usuń użytkownika";
+    
             manageModal.show();
         });
     });
@@ -246,6 +266,28 @@ document.addEventListener("DOMContentLoaded", () => {
         .catch(err => console.error(err));
     });
 
+     deactivateEmployeeBtn.addEventListener("click", () => {
+        fetch("/admin/users/deactivate-employee", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: selectedUserId })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "ok") {
+                     selectedUserIsActive = data.is_active;
+                    // Zmien tekst przycisku w locie
+                    
+                    //document.querySelector(`.manage-btn[data-id="${selectedUserId}"]`).dataset.active = selectedUserIsActive;
+
+                    location.reload();
+                    manageModal.hide();
+                    //alert("uzytkownik zdeaktywowany");
+                }
+            });
+
+   });
+
      deleteUserBtn.addEventListener("click", () => {
         fetch("/admin/users/delete", {
             method: "POST",
@@ -267,8 +309,97 @@ document.addEventListener("DOMContentLoaded", () => {
         .catch(err => console.error(err));
     });
 
+    // zarządzanie i pobieranie qr
+    const downloadQrBtn = document.getElementById("downloadQrBtn");
+    const regenerateQrBtn = document.getElementById("regenerateQrBtn");
+
+    if (downloadQrBtn && regenerateQrBtn) {
+
+        downloadQrBtn.textContent="Pobierz  QR";
+        regenerateQrBtn.textContent="Wygeneruj nowy QR";
+        downloadQrBtn.addEventListener("click", () => {
+            window.location.href = `/admin/users/qr/${selectedUserId}`;
+            manageModal.hide();
+        });
+
+        regenerateQrBtn.addEventListener("click", () => {
+            fetch("/admin/users/regenerate-qr", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: selectedUserId })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "ok") {
+                    manageModal.hide();
+                    //alert("Nowy QR wygenerowany");
+                }
+            });
+        });
+
+    }
+    // wgrywanie zdjecia wzorcowego
+    const uploadFaceBtn = document.getElementById("uploadFaceBtn");
+    const faceInput = document.getElementById("faceUploadInput");
+
+    uploadFaceBtn.textContent="Wgraj zdjęcie wzorcowe";
+    uploadFaceBtn.addEventListener("click", () => {
+    faceInput.value = ""; // reset input
+    faceInput.click();    // otwiera okno wyboru pliku
+});
+
+// Event change → wysyłka od razu po wybraniu pliku
+faceInput.addEventListener("change", () => {
+    if (!faceInput.files.length) return; // nic nie wybrano
+
+    const formData = new FormData();
+    formData.append("photo", faceInput.files[0]);
+    formData.append("user_id", selectedUserId);
+
+    fetch("/admin/users/upload-face", {
+        method: "POST",
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === "ok") {
+            //alert("Zdjęcie zapisane"); // możesz też toast
+            manageModal.hide();        // zamyka modal
+        } else {
+            alert(data.message || "Błąd uploadu");
+        }
+        faceInput.value = "";          // reset input
+    })
+    .catch(err => console.error(err));
+});
+
+    const searchInput = document.getElementById("searchInput");
+    const table = document.querySelector("table tbody");
+    const rows = table.querySelectorAll("tr");
+
+    searchInput.addEventListener("input", () => {
+        const query = searchInput.value.toLowerCase();
+
+        rows.forEach(row => {
+            // Pobieramy tekst ze wszystkich komórek poza ostatnią (Akcje)
+            const cells = Array.from(row.querySelectorAll("td")).slice(0, -1);
+            const rowText = cells.map(cell => cell.textContent.toLowerCase()).join(" ");
+
+            if (rowText.includes(query)) {
+                row.style.display = ""; // pokaż wiersz
+            } else {
+                row.style.display = "none"; // ukryj wiersz
+            }
+        });
+    });    
+   
+   
+    
+
 
 });
+
+
 
 
 

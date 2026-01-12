@@ -1,7 +1,5 @@
 from database import db
-from datetime import datetime
-
-
+import datetime
 class Log(db.Model):
     __tablename__ = "logs"
 
@@ -11,14 +9,13 @@ class Log(db.Model):
     employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False)
 
     # data + czas
-    date = db.Column(db.Date, default=datetime.utcnow)
-    time = db.Column(db.Time, default=datetime.utcnow)
+    date = db.Column(db.DateTime, default=None)
 
     # wynik weryfikacji (np. matched / rejected)
     verification_result = db.Column(db.String(50), nullable=False)
 
     # zdjęcie z próby (hash lub ścieżka)
-    attempt_photo_hash = db.Column(db.String(255), nullable=True)
+    attempt_photo_path = db.Column(db.String(255), nullable=True)
 
     # status kodu QR (True = poprawny, False = błędny)
     qr_status = db.Column(db.Boolean, default=False)

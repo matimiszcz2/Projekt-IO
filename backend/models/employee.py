@@ -11,14 +11,18 @@ class Employee(db.Model):
     stanowisko = db.Column(db.String(100), nullable=False)
 
     # hash zdjęcia pracownika
-    photo_hash = db.Column(db.String(255), nullable=False)
+    photo_hash = db.Column(db.String(255), nullable=True)
 
     # wartość zakodowanego QR (np. UUID)
-    qr_value = db.Column(db.String(255), unique=True, nullable=False)
+    qr_value = db.Column(db.String(255), unique=True, nullable=True)
 
     # uprawnienia admina (True = admin)
     is_admin = db.Column(db.Boolean, default=False)
 
+    # czy aktywny
+    is_active = db.Column(db.Boolean, default = True)
+    # data ostatniego update zdjecia
+    last_photo_update = db.Column(db.DateTime, nullable = True)
     # relacja do logów
     logs = db.relationship("Log", back_populates="employee", cascade="all, delete")
 

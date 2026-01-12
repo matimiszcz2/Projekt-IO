@@ -27,4 +27,8 @@ qrcode==7.4.2
 
 # --- Przydatne narzędzia ---
 numpy
+hashlib
+qrcode
+
+
 
