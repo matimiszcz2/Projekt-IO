@@ -1,0 +1,29 @@
+/* Miniaturki logów */
+.log-thumbnail {
+    width: 105px; /* było 80px → ok. +1/3 */
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.log-thumbnail:hover {
+    transform: scale(1.05);
+}
+
+/* Overlay fullscreen dla zdjęcia */
+#imageOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.85);
+    justify-content: center;
+    align-items: center;
+}
+
+#imageOverlay img {
+    max-width: 95vw;   /* viewport width */
+    max-height: 95vh;  /* viewport height */
+    transform: scale(1.3); /* powiększenie overlay o ~1/3 */
+    border-radius: 6px;
+    box-shadow: 0 0 30px black;
+}

@@ -4,7 +4,6 @@ from flask_cors import CORS
 from database import db
 from models import Employee, Log
 from deepface import DeepFace
-import os
 import base64
 import numpy as np
 import cv2
@@ -12,7 +11,14 @@ import uuid
 from datetime import datetime
 import hashlib
 import qrcode
+from fpdf import FPDF
+from io import StringIO
+import csv
+from flask import Response
+import os
 from io import BytesIO
+
+
 
 
 
@@ -162,7 +168,7 @@ def check_qr():
         new_log = Log(
             employee_id = user.id,
             date = datetime.now(),
-            verification_result = "rejected",
+            verification_result = "Odmowa",
             qr_status = False
         )
         db.session.add(new_log)
@@ -175,7 +181,7 @@ def check_qr():
         new_log = Log(
             employee_id = user.id,
             date = datetime.now(),
-            verification_result = "rejected - no photo",
+            verification_result = "Odmowa - brak zdjęcia",
             qr_status = True
         )
         db.session.add(new_log)
@@ -236,9 +242,10 @@ def verify_face():
             new_log = Log(
                 employee_id = user.id,
                 date = datetime.now(),
-                verification_result = "matched",
+                verification_result = "Dostęp przyznany",
                 attempt_photo_path = target_path,
-                qr_status = True
+                qr_status = True,
+                similarity=1-result.get('distance')  # <-- zapisujemy similarity
             )
             db.session.add(new_log)
             db.session.commit()
@@ -260,9 +267,10 @@ def verify_face():
                 new_log = Log(
                     employee_id = user.id,
                     date = datetime.now(),
-                    verification_result = "rejected - wrong face",
+                    verification_result = "Odmowa - twarz",
                     attempt_photo_path = target_path,
-                    qr_status = True
+                    qr_status = True,
+                    similarity=1-result.get('distance')  # <-- zapisujemy similarity
                 )
                 db.session.add(new_log)
                 db.session.commit()
@@ -516,6 +524,183 @@ def deactivate_employee():
         "status":"ok"
     })
 
+@app.route("/uploads/faces/<filename>")
+def uploaded_face(filename):
+    face_path = os.path.join(LOG_FACE_DIR, filename)
+    if os.path.exists(face_path):
+        return send_file(face_path, mimetype="image/jpeg")
+    else:
+        abort(404)
+
+@app.route("/uploads/known_faces/<filename>")
+def known_face(filename):
+    face_path = os.path.join(KNOWN_FACES_DIR, filename)
+    if os.path.exists(face_path):
+        return send_file(face_path, mimetype="image/jpeg")
+    else:
+        abort(404)
+
+
+@app.route("/admin/statistics")
+def admin_statistics():
+    if not check_admin():
+        return redirect(url_for("index"))
+
+    logs = Log.query.order_by(Log.date.desc()).all()
+    # dodajemy photo_url do każdego logu
+
+    for log in logs:
+        # Miniatura zdjęcia logu
+        if log.attempt_photo_path and os.path.exists(log.attempt_photo_path):
+            filename = os.path.basename(log.attempt_photo_path)
+            log.photo_url = url_for("uploaded_face", filename=filename)
+        else:
+            log.photo_url = None
+
+        # Zdjęcie wzorcowe
+        known_path = os.path.join(KNOWN_FACES_DIR, f"{log.employee.qr_value}.jpg")
+        if os.path.exists(known_path):
+            log.template_photo_url = url_for("known_face", filename=f"{log.employee.qr_value}.jpg")
+        else:
+            log.template_photo_url = None
+
+    return render_template("statistics.html", logs=logs)
+
+
+@app.route("/admin/logs/export/csv")
+def export_logs_csv():
+    if not check_admin():
+        return redirect(url_for("index"))
+
+    logs = Log.query.all()
+
+    # StringIO zamiast BytesIO
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow(["ID pracownika", "Data/Czas", "Wynik", "QR status", "Ścieżka zdjęcia"])
+
+    for log in logs:
+        cw.writerow([log.employee_id, log.date, log.verification_result, log.qr_status, log.attempt_photo_path])
+
+    # Przesuń wskaźnik na początek
+    si.seek(0)
+
+    # Flask potrzebuje bajtów, więc zakoduj na utf-8
+    return Response(
+        si.getvalue(),  # <-- to jest str
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=logs.csv"}
+    )
+
+
+
+@app.route("/admin/logs/export/pdf")
+def export_logs_pdf():
+    if not check_admin():
+        return redirect(url_for("index"))
+
+    logs = Log.query.all()
+    pdf = FPDF()
+    pdf.add_page()
+
+    # Dodajemy czcionkę Unicode
+    font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
+    pdf.add_font("DejaVu", "", font_path, uni=True)
+    pdf.add_font("DejaVu", "B", font_path, uni=True)
+
+    pdf.set_font("DejaVu", 'B', 16)
+    pdf.cell(0, 10, txt="Raport logów", ln=True, align='C')
+    pdf.ln(5)
+
+    # --- Ustawienia tabeli ---
+    widths = [20, 55, 46, 25, 50]  # ID, Data/Czas, Wynik, QR, Zdjęcie (zdjęcie większe)
+    row_height = 50  # wysokość wiersza danych (mniejsza niż poprzednie 25)
+    image_size = 49  # szerokość i wysokość obrazka w mm
+
+    # --- Nagłówki tabeli ---
+    headers = ["ID", "Data/Czas", "Wynik", "QR", "Zdjęcie"]
+    for i in range(len(headers)):
+        pdf.cell(widths[i], 10, headers[i], 1, 0, 'C')
+    pdf.ln()  # przejście do wiersza danych
+
+    # --- Dane w tabeli ---
+    pdf.set_font("DejaVu", '', 12)
+    for log in logs:
+        # ID, Data, Wynik, QR
+        pdf.cell(widths[0], row_height, str(log.employee_id), 1, 0, 'C')
+        pdf.cell(widths[1], row_height, log.date.strftime("%Y-%m-%d %H:%M:%S"), 1, 0, 'C')
+        pdf.cell(widths[2], row_height, log.verification_result, 1, 0, 'C')
+        pdf.cell(widths[3], row_height, str(log.qr_status), 1, 0, 'C')
+
+        # Zdjęcie
+        x = pdf.get_x()
+        y = pdf.get_y()
+        pdf.cell(widths[4], row_height, "", 1, 0, 'C')  # pusta komórka z ramką
+
+        if log.attempt_photo_path and os.path.exists(log.attempt_photo_path):
+            pdf.image(
+                os.path.abspath(log.attempt_photo_path).replace("\\", "/"),
+                x=x + (widths[4] - image_size) / 2,  # centrowanie obrazka w komórce
+                y=y + (row_height - image_size) / 2,
+                w=image_size,
+                h=image_size
+            )
+
+        pdf.ln(row_height)  # przejście do kolejnego wiersza
+
+    buf = BytesIO()
+    pdf.output(buf)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name="logs.pdf")
+
+
+@app.route("/admin/logs/reset", methods=["POST"])
+def reset_logs():
+    logs = Log.query.all()
+    print("Logów przed usunięciem:", len(logs))
+
+    for log in logs:
+        if log.attempt_photo_path and os.path.exists(log.attempt_photo_path):
+            os.remove(log.attempt_photo_path)
+            print("Usunięto zdjęcie:", log.attempt_photo_path)
+
+    Log.query.delete()
+    db.session.commit()
+    print("Wszystkie logi zostały usunięte.")
+    return jsonify({"status": "ok", "message": "Wszystkie logi zostały usunięte."})
+
+@app.route("/admin/settings", methods=["GET", "POST"])
+def admin_settings():
+    if not check_admin():
+        return redirect(url_for("index"))
+
+    # Pobieramy aktualne ustawienia z bazy lub pliku (na razie użyjemy prostego słownika)
+    SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+
+    import json
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r") as f:
+            settings = json.load(f)
+    else:
+        settings = {
+            "threshold": 0.4,          # threshold dla DeepFace
+            "camera_enabled": True,
+            "qr_scanner_enabled": True
+        }
+
+    if request.method == "POST":
+        data = request.get_json()
+        settings["threshold"] = float(data.get("threshold", settings["threshold"]))
+        settings["camera_enabled"] = bool(data.get("camera_enabled", settings["camera_enabled"]))
+        settings["qr_scanner_enabled"] = bool(data.get("qr_scanner_enabled", settings["qr_scanner_enabled"]))
+
+        # zapisujemy do pliku
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(settings, f)
+
+        return jsonify({"status": "ok", "settings": settings})
+
+    return render_template("settings.html", settings=settings)
 
 
 if __name__ == "__main__":

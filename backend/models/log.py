@@ -20,8 +20,11 @@ class Log(db.Model):
     # status kodu QR (True = poprawny, False = błędny)
     qr_status = db.Column(db.Boolean, default=False)
 
+    similarity = db.Column(db.Float, nullable=True)
+
     # relacja zwrotna
     employee = db.relationship("Employee", back_populates="logs")
+
 
     def __repr__(self):
         return f"<Log employee={self.employee_id} result={self.verification_result}>"

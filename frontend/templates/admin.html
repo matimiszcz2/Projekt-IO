@@ -65,16 +65,16 @@
     <div class="collapse navbar-collapse" id="adminNavbar">
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
             <li class="nav-item">
-                <a class="nav-link" href="#">Dashboard</a>
+                <a class="nav-link" href="/admin">Dashboard</a>
             </li>
             <li class="nav-item">
                 <a class="nav-link" href="/admin/users">Użytkownicy</a>
             </li>
             <li class="nav-item">
-                <a class="nav-link" href="#">Raporty</a>
+                <a class="nav-link" href="/admin/statistics">Raporty</a>
             </li>
             <li class="nav-item">
-                <a class="nav-link" href="#">Ustawienia</a>
+                <a class="nav-link" href="/admin/settings">Ustawienia</a>
             </li>
         </ul>
 
@@ -108,7 +108,7 @@
                         <div class="card-body">
                             <h5 class="card-title">Statystyki</h5>
                             <p class="card-text">Podgląd danych i raportów.</p>
-                            <button class="btn btn-primary">Przejdź</button>
+                            <button class="btn btn-primary" onclick="location.href='/admin/statistics';">Przejdź</button>
                         </div>
                     </div>
                 </div>
@@ -118,7 +118,7 @@
                         <div class="card-body">
                             <h5 class="card-title">Ustawienia</h5>
                             <p class="card-text">Konfiguracja systemu.</p>
-                            <button class="btn btn-primary">Przejdź</button>
+                            <button class="btn btn-primary" onclick="location.href='/admin/settings';">Przejdź</button>
                         </div>
                     </div>
                 </div>
