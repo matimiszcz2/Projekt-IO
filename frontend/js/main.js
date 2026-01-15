@@ -6,6 +6,7 @@ const SCANNER_ID = 'qr-reader';
 let scanner = null;
 let isProcessing = false;
 
+
 function updateStatus(message, type) {
     const statusEl = document.getElementById('status');
     statusEl.innerText = message;
@@ -89,7 +90,7 @@ async function handleScanSuccess(decodedText, decodedResult) {
                 scanner.pause();
                 showAccessModal(resultFace.user_name);
             }
-                
+
         } else {
             throw new Error(resultFace.message || "Twarz nierozpoznana");
         }
@@ -231,16 +232,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
             modalUserName.textContent = btn.dataset.name;
-            
+
             deactivateEmployeeBtn.textContent = selectedUserIsActive
                 ? "Dezaktywuj"
                 : "Aktywuj";
-           
+
             toggleAdminBtn.textContent = selectedUserIsAdmin
                 ? "Odbierz uprawnienia admina"
                 : "Nadaj uprawnienia admina";
             deleteUserBtn.textContent = "Usuń użytkownika";
-    
+
             manageModal.show();
         });
     });
@@ -277,7 +278,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (data.status === "ok") {
                      selectedUserIsActive = data.is_active;
                     // Zmien tekst przycisku w locie
-                    
+
                     //document.querySelector(`.manage-btn[data-id="${selectedUserId}"]`).dataset.active = selectedUserIsActive;
 
                     location.reload();
@@ -391,10 +392,10 @@ faceInput.addEventListener("change", () => {
                 row.style.display = "none"; // ukryj wiersz
             }
         });
-    });    
-   
-   
-    
+    });
+
+
+
 
 
 });
@@ -405,11 +406,53 @@ faceInput.addEventListener("change", () => {
 
 
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+
+    let CAMERA_ENABLED = true;
+    let QR_SCANNER_ENABLED = true;
+
+    // Pobranie ustawień z backendu
+    try {
+        const resp = await fetch("/api/settings");
+        const data = await resp.json();
+        CAMERA_ENABLED = data.camera_enabled ?? true;
+        QR_SCANNER_ENABLED = data.qr_scanner_enabled ?? true;
+
+        console.log("Ustawienia:", data);
+    } catch(err) {
+        console.warn("Nie udało się pobrać ustawień, używam domyślnych:", err);
+    }
+
+    const statusEl = document.getElementById("status");
+
+    if (!QR_SCANNER_ENABLED) {
+        if (!CAMERA_ENABLED) {
+            if (!QR_SCANNER_ENABLED && !CAMERA_ENABLED) {
+                statusEl.innerText = "Kamera i skaner QR są wyłączone";
+                statusEl.className = "error";
+                return; // koniec – nie startujemy kamery
+            }
+            statusEl.innerText = "Kamera wyłączona w ustawieniach";
+            statusEl.className = "info";
+            document.getElementById(SCANNER_ID).style.background = "#555";
+            return; // koniec – nie startujemy kamery
+        }
+        statusEl.innerText = "Skaner QR wyłączony w ustawieniach";
+        statusEl.className = "info";
+        return; // koniec – QR nie startuje
+    }
+
+
+
+
+
+
+    // ⚡ TYLKO TERAZ inicjalizujemy skaner
     scanner = new Html5QrcodeScanner(
         SCANNER_ID,
         { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
         false
     );
-    scanner.render(handleScanSuccess, (er) => { });
+    scanner.render(handleScanSuccess, (err) => { console.warn(err); });
+
 });

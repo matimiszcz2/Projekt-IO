@@ -7,7 +7,6 @@ from deepface import DeepFace
 import base64
 import numpy as np
 import cv2
-import uuid
 from datetime import datetime
 import hashlib
 import qrcode
@@ -19,10 +18,9 @@ import os
 from io import BytesIO
 
 
-
-
-
-
+PERCENTAGE_THRESHOLD = 10
+CAMERA_ENABLED = True
+QR_SCANNER_ENABLED = True
 
 def create_app():
     template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../frontend/templates'))
@@ -33,11 +31,11 @@ def create_app():
     app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
     CORS(app)
 
-    # konfiguracja bazy danych (SQLite dla łatwości)
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
+    # konfiguracja bazy danych (stara baza w backend/instance)
+    db_path = os.path.join(os.path.dirname(__file__), "instance", "database.db")  # backend/instance/database.db
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = "super-secret-key"
-
 
     db.init_app(app)
     Migrate(app, db)
@@ -210,7 +208,7 @@ def verify_face():
         # 1. Zapisujemy zdjęcie z kamery do pliku tymczasowego
         # DeepFace najlepiej działa na ścieżkach do plików
         target_path = decode_and_save_image(image_face_b64, LOG_FACE_DIR, f"FACE_{qr_code}")
-        
+
         if not target_path:
             return jsonify({"status": "error", "message": "Błąd zapisu zdjęcia"}), 500
 
@@ -234,7 +232,10 @@ def verify_face():
             return jsonify({"status": "denied", "message": "Nie udało się przetworzyć twarzy"}), 200
 
         # 4. Interpretacja wyniku
-        if result['verified']:
+        distance = result["distance"]
+        similarity_threshold = 1 - PERCENTAGE_THRESHOLD/100
+        if distance <= similarity_threshold:
+
             #user = fake_database.get(qr_code)
             user = Employee.query.filter_by(qr_value=qr_code).first()
 
@@ -257,8 +258,8 @@ def verify_face():
                 session.clear()
                 session["user_id"] = user.id   # ← zapisujemy KONKRETNEGO usera
             return jsonify({"status": "granted", "user_name": user.imie, "is_admin":user.is_admin})
-            
-            
+
+
         else:
             session.clear()
             print(f"Odmowa. Dystans: {result['distance']}")
@@ -278,7 +279,7 @@ def verify_face():
                 print("dupa zbita")
 
 
-                
+
             return jsonify({"status": "denied", "message": "Twarz niezgodna z wzorcem."})
 
     except Exception as e:
@@ -574,23 +575,47 @@ def export_logs_csv():
 
     logs = Log.query.all()
 
-    # StringIO zamiast BytesIO
+    # Dodajemy tymczasowe pola photo_url i template_photo_url
+    for log in logs:
+        log.photo_url = log.attempt_photo_path if log.attempt_photo_path and os.path.exists(log.attempt_photo_path) else "Brak"
+        known_path = os.path.join(KNOWN_FACES_DIR, f"{log.employee.qr_value}.jpg")
+        log.template_photo_url = known_path if os.path.exists(known_path) else "Brak"
+
+    # StringIO z UTF-8
     si = StringIO()
     cw = csv.writer(si)
-    cw.writerow(["ID pracownika", "Data/Czas", "Wynik", "QR status", "Ścieżka zdjęcia"])
+    cw.writerow([
+        "ID pracownika",
+        "Data/Czas",
+        "Status QR",
+        "Wynik weryfikacji",
+        "Podobieństwo",
+    ])
 
     for log in logs:
-        cw.writerow([log.employee_id, log.date, log.verification_result, log.qr_status, log.attempt_photo_path])
+        similarity_text = f"{log.similarity * 100:.2f}%" if log.similarity is not None else "-"
+        cw.writerow([
+            log.employee_id,
+            log.date.strftime("%Y-%m-%d %H:%M:%S"),
+            "Zgodne" if log.qr_status else "Niezgodne",
+            log.verification_result,
+            similarity_text,
+        ])
 
-    # Przesuń wskaźnik na początek
     si.seek(0)
+    csv_data = si.getvalue()
 
-    # Flask potrzebuje bajtów, więc zakoduj na utf-8
+    # Dodaj BOM dla Excela
+    bom = "\ufeff"
+    csv_data = bom + csv_data
+
     return Response(
-        si.getvalue(),  # <-- to jest str
-        mimetype="text/csv",
-        headers={"Content-Disposition": "attachment;filename=logs.csv"}
+        csv_data,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment;filename=statystyki_logow.csv"}
     )
+
+
 
 
 
@@ -600,58 +625,77 @@ def export_logs_pdf():
         return redirect(url_for("index"))
 
     logs = Log.query.all()
-    pdf = FPDF()
+
+    # --- Dodanie tymczasowych pól ---
+    for log in logs:
+        log.photo_url = log.attempt_photo_path if log.attempt_photo_path and os.path.exists(log.attempt_photo_path) else None
+        log.template_photo_url = os.path.join(KNOWN_FACES_DIR, f"{log.employee.qr_value}.jpg")
+        if not os.path.exists(log.template_photo_url):
+            log.template_photo_url = None
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.add_page()
 
-    # Dodajemy czcionkę Unicode
+    # Czcionka Unicode
     font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
     pdf.add_font("DejaVu", "", font_path, uni=True)
     pdf.add_font("DejaVu", "B", font_path, uni=True)
 
-    pdf.set_font("DejaVu", 'B', 16)
-    pdf.cell(0, 10, txt="Raport logów", ln=True, align='C')
+    pdf.set_font("DejaVu", "B", 16)
+    pdf.cell(0, 10, "Statystyki logów wejścia", ln=True, align="C")
     pdf.ln(5)
 
-    # --- Ustawienia tabeli ---
-    widths = [20, 55, 46, 25, 50]  # ID, Data/Czas, Wynik, QR, Zdjęcie (zdjęcie większe)
-    row_height = 50  # wysokość wiersza danych (mniejsza niż poprzednie 25)
-    image_size = 49  # szerokość i wysokość obrazka w mm
+    # Nagłówki tabeli
+    pdf.set_font("DejaVu", "B", 10)
+    widths = [30, 45, 30, 55, 25, 45, 45]
+    headers = ["ID pracownika","Data/Czas","Status QR","Wynik weryfikacji","Podobieństwo","Zdjęcie logu","Zdjęcie wzorcowe"]
+    for w, h in zip(widths, headers):
+        pdf.cell(w, 10, h, 1, 0, "C")
+    pdf.ln()
 
-    # --- Nagłówki tabeli ---
-    headers = ["ID", "Data/Czas", "Wynik", "QR", "Zdjęcie"]
-    for i in range(len(headers)):
-        pdf.cell(widths[i], 10, headers[i], 1, 0, 'C')
-    pdf.ln()  # przejście do wiersza danych
+    # Dane
+    pdf.set_font("DejaVu", "", 9)
+    row_height = 35
+    img_size = 30
 
-    # --- Dane w tabeli ---
-    pdf.set_font("DejaVu", '', 12)
     for log in logs:
-        # ID, Data, Wynik, QR
-        pdf.cell(widths[0], row_height, str(log.employee_id), 1, 0, 'C')
-        pdf.cell(widths[1], row_height, log.date.strftime("%Y-%m-%d %H:%M:%S"), 1, 0, 'C')
-        pdf.cell(widths[2], row_height, log.verification_result, 1, 0, 'C')
-        pdf.cell(widths[3], row_height, str(log.qr_status), 1, 0, 'C')
+        pdf.cell(widths[0], row_height, str(log.employee_id), 1, 0, "C")
+        pdf.cell(widths[1], row_height, log.date.strftime("%Y-%m-%d %H:%M:%S"), 1, 0, "C")
+        pdf.cell(widths[2], row_height, "Zgodne" if log.qr_status else "Niezgodne", 1, 0, "C")
+        pdf.cell(widths[3], row_height, log.verification_result, 1, 0, "C")
+        similarity_text = f"{log.similarity * 100:.2f}%" if log.similarity is not None else "-"
+        pdf.cell(widths[4], row_height, similarity_text, 1, 0, "C")
 
-        # Zdjęcie
+        # Zdjęcie logu
         x = pdf.get_x()
         y = pdf.get_y()
-        pdf.cell(widths[4], row_height, "", 1, 0, 'C')  # pusta komórka z ramką
+        pdf.cell(widths[5], row_height, "", 1)
+        if log.photo_url:
+            pdf.image(log.photo_url, x + 2, y + 2, w=img_size, h=img_size)
 
-        if log.attempt_photo_path and os.path.exists(log.attempt_photo_path):
-            pdf.image(
-                os.path.abspath(log.attempt_photo_path).replace("\\", "/"),
-                x=x + (widths[4] - image_size) / 2,  # centrowanie obrazka w komórce
-                y=y + (row_height - image_size) / 2,
-                w=image_size,
-                h=image_size
-            )
+        # Zdjęcie wzorcowe
+        x = pdf.get_x()
+        y = pdf.get_y()
+        pdf.cell(widths[6], row_height, "", 1)
+        if log.template_photo_url:
+            pdf.image(log.template_photo_url, x + 2, y + 2, w=img_size, h=img_size)
 
-        pdf.ln(row_height)  # przejście do kolejnego wiersza
+        pdf.ln(row_height)
 
     buf = BytesIO()
     pdf.output(buf)
     buf.seek(0)
-    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name="logs.pdf")
+
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="statystyki_logow.pdf"
+    )
+
+
+
+
 
 
 @app.route("/admin/logs/reset", methods=["POST"])
@@ -669,38 +713,155 @@ def reset_logs():
     print("Wszystkie logi zostały usunięte.")
     return jsonify({"status": "ok", "message": "Wszystkie logi zostały usunięte."})
 
-@app.route("/admin/settings", methods=["GET", "POST"])
+@app.route("/admin/settings", methods=["POST"])
+def save_admin_settings():
+    global PERCENTAGE_THRESHOLD, CAMERA_ENABLED, QR_SCANNER_ENABLED
+
+    data = request.json
+
+    PERCENTAGE_THRESHOLD = float(data["threshold"])
+    CAMERA_ENABLED = bool(data["camera_enabled"])
+    QR_SCANNER_ENABLED = bool(data["qr_scanner_enabled"])
+
+    return jsonify({"status": "ok"})
+
+@app.route("/admin/settings", methods=["GET"])
 def admin_settings():
+    settings = {
+        "threshold": PERCENTAGE_THRESHOLD,
+        "camera_enabled": CAMERA_ENABLED,
+        "qr_scanner_enabled": QR_SCANNER_ENABLED
+    }
+    return render_template("settings.html", settings=settings)
+
+
+@app.route("/admin/settings/threshold", methods=["GET", "POST"])
+def threshold_settings():
+    global PERCENTAGE_THRESHOLD
+
+    if request.method == "POST":
+        data = request.json
+        PERCENTAGE_THRESHOLD = float(data["threshold"])
+        return jsonify({"status": "ok", "threshold": PERCENTAGE_THRESHOLD})
+
+    return jsonify({"threshold": PERCENTAGE_THRESHOLD})
+
+@app.route("/api/settings", methods=["GET"])
+def api_get_settings():
+    global PERCENTAGE_THRESHOLD, CAMERA_ENABLED, QR_SCANNER_ENABLED
+    return jsonify({
+        "threshold": PERCENTAGE_THRESHOLD,
+        "camera_enabled": CAMERA_ENABLED,
+        "qr_scanner_enabled": QR_SCANNER_ENABLED
+    })
+
+@app.route("/admin/settings/export")
+def export_database_pdf():
     if not check_admin():
         return redirect(url_for("index"))
 
-    # Pobieramy aktualne ustawienia z bazy lub pliku (na razie użyjemy prostego słownika)
-    SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+    # --- Pobranie danych ---
+    employees = Employee.query.order_by(Employee.id).all()
+    logs = Log.query.order_by(Log.date.desc()).all()
 
-    import json
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r") as f:
-            settings = json.load(f)
-    else:
-        settings = {
-            "threshold": 0.4,          # threshold dla DeepFace
-            "camera_enabled": True,
-            "qr_scanner_enabled": True
-        }
+    # --- Dodanie tymczasowych pól dla logów ---
+    for log in logs:
+        log.photo_url = log.attempt_photo_path if log.attempt_photo_path and os.path.exists(log.attempt_photo_path) else None
+        known_path = os.path.join(KNOWN_FACES_DIR, f"{log.employee.qr_value}.jpg")
+        log.template_photo_url = known_path if os.path.exists(known_path) else None
 
-    if request.method == "POST":
-        data = request.get_json()
-        settings["threshold"] = float(data.get("threshold", settings["threshold"]))
-        settings["camera_enabled"] = bool(data.get("camera_enabled", settings["camera_enabled"]))
-        settings["qr_scanner_enabled"] = bool(data.get("qr_scanner_enabled", settings["qr_scanner_enabled"]))
+    # --- Tworzenie PDF ---
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.add_page()
 
-        # zapisujemy do pliku
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(settings, f)
+    # Czcionka Unicode
+    font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
+    pdf.add_font("DejaVu", "", font_path, uni=True)
+    pdf.add_font("DejaVu", "B", font_path, uni=True)
 
-        return jsonify({"status": "ok", "settings": settings})
+    pdf.set_font("DejaVu", "B", 16)
+    pdf.cell(0, 10, "Raport pełnej bazy danych", ln=True, align="C")
+    pdf.ln(5)
 
-    return render_template("settings.html", settings=settings)
+    # --- Sekcja Employees ---
+    pdf.set_font("DejaVu", "B", 10)
+    pdf.cell(0, 10, "Tabela Employees", ln=True)
+    pdf.set_font("DejaVu", "B", 8)
+
+    # Nagłówki tabeli
+    emp_widths = [7, 20, 25, 25, 20, 120, 17, 15, 35]  # dopasowane do kolumn
+    emp_headers = ["ID","Imię","Nazwisko","Stanowisko","Photo Hash","QR Value","Admin","Aktywny","Ostatni Update"]
+    for w, h in zip(emp_widths, emp_headers):
+        pdf.cell(w, 10, h, 1, 0, "C")
+    pdf.ln()
+
+    pdf.set_font("DejaVu", "", 8)
+    row_height = 8
+
+    for emp in employees:
+        pdf.cell(emp_widths[0], row_height, str(emp.id), 1, 0, "C")
+        pdf.cell(emp_widths[1], row_height, emp.imie, 1, 0, "C")
+        pdf.cell(emp_widths[2], row_height, emp.nazwisko, 1, 0, "C")
+        pdf.cell(emp_widths[3], row_height, emp.stanowisko, 1, 0, "C")
+        pdf.cell(emp_widths[4], row_height, emp.photo_hash if emp.photo_hash else "-", 1, 0, "C")
+        pdf.cell(emp_widths[5], row_height, emp.qr_value if emp.qr_value else "-", 1, 0, "C")
+        pdf.cell(emp_widths[6], row_height, "Tak" if emp.is_admin else "Nie", 1, 0, "C")
+        pdf.cell(emp_widths[7], row_height, "Tak" if emp.is_active else "Nie", 1, 0, "C")
+        pdf.cell(emp_widths[8], row_height, emp.last_photo_update.strftime("%Y-%m-%d %H:%M:%S") if emp.last_photo_update else "-", 1, 0, "C")
+        pdf.ln()
+
+    pdf.ln(5)
+
+    # --- Sekcja Logs ---
+    pdf.set_font("DejaVu", "B", 12)
+    pdf.cell(0, 10, "Tabela Logs", ln=True)
+    pdf.set_font("DejaVu", "B", 10)
+
+    log_widths = [30, 45, 30, 55, 25, 45, 45]
+    log_headers = ["ID pracownika","Data/Czas","Status QR","Wynik weryfikacji","Podobieństwo","Zdjęcie logu","Zdjęcie wzorcowe"]
+    for w, h in zip(log_widths, log_headers):
+        pdf.cell(w, 10, h, 1, 0, "C")
+    pdf.ln()
+
+    pdf.set_font("DejaVu", "", 9)
+    row_height = 35
+    img_size = 30
+
+    for log in logs:
+        pdf.cell(log_widths[0], row_height, str(log.employee_id), 1, 0, "C")
+        pdf.cell(log_widths[1], row_height, log.date.strftime("%Y-%m-%d %H:%M:%S"), 1, 0, "C")
+        pdf.cell(log_widths[2], row_height, "Zgodne" if log.qr_status else "Niezgodne", 1, 0, "C")
+        pdf.cell(log_widths[3], row_height, log.verification_result, 1, 0, "C")
+        similarity_text = f"{log.similarity * 100:.2f}%" if log.similarity is not None else "-"
+        pdf.cell(log_widths[4], row_height, similarity_text, 1, 0, "C")
+
+        x = pdf.get_x()
+        y = pdf.get_y()
+        pdf.cell(log_widths[5], row_height, "", 1)
+        if log.photo_url:
+            pdf.image(log.photo_url, x + 2, y + 2, w=img_size, h=img_size)
+
+        x = pdf.get_x()
+        y = pdf.get_y()
+        pdf.cell(log_widths[6], row_height, "", 1)
+        if log.template_photo_url:
+            pdf.image(log.template_photo_url, x + 2, y + 2, w=img_size, h=img_size)
+
+        pdf.ln(row_height)
+
+    # --- Zwrócenie PDF ---
+    buf = BytesIO()
+    pdf.output(buf)
+    buf.seek(0)
+
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="full_database_report.pdf"
+    )
+
+
 
 
 if __name__ == "__main__":
