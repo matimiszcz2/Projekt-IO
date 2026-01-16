@@ -5,21 +5,21 @@
 
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
-<!-- Filtry logów w jednym wierszu -->
+<!-- Filtry logów -->
 <div class="mb-3 row g-2 align-items-center">
     <div class="col-md-4">
         <label for="filterDate" class="form-label">Data:</label>
         <input type="date" id="filterDate" class="form-control">
     </div>
     <div class="col-md-4">
-        <label for="filterResult" class="form-label"> Wynik weryfikacji:</label>
+        <label for="filterResult" class="form-label">Wynik weryfikacji:</label>
         <select id="filterResult" class="form-select">
             <option value="">Wszystkie</option>
             <option value="Zgodne">Zgodne</option>
             <option value="Niezgodne">Niezgodne</option>
         </select>
     </div>
-    <div class="col-md-4 d-flex flex-column">
+    <div class="col-md-4">
         <label for="filterQR" class="form-label">Status QR:</label>
         <select id="filterQR" class="form-select">
             <option value="">Wszystkie</option>
@@ -35,7 +35,6 @@
     <a href="/admin/logs/export/pdf" class="btn btn-danger">Eksport PDF</a>
 </div>
 
-<!-- Tabela logów -->
 <table class="table table-striped table-bordered" id="logsTable">
     <thead>
         <tr>
@@ -68,105 +67,75 @@
         </td>
         <td>
             {% if log.photo_url %}
-                <img
-                    src="{{ log.photo_url }}"
-                    class="log-thumbnail"
-                    alt="Zdjęcie logu"
-                    onclick="openImage('{{ log.photo_url }}')"
-                >
+                <img src="{{ log.photo_url }}" class="log-thumbnail"
+                     onclick="openImage('{{ log.photo_url }}')">
             {% else %}
                 Brak zdjęcia
             {% endif %}
         </td>
         <td>
             {% if log.template_photo_url %}
-                <img
-                    src="{{ log.template_photo_url }}"
-                    class="log-thumbnail"
-                    alt="Zdjęcie wzorcowe"
-                    onclick="openImage('{{ log.template_photo_url }}')"
-                >
+                <img src="{{ log.template_photo_url }}" class="log-thumbnail"
+                     onclick="openImage('{{ log.template_photo_url }}')">
             {% else %}
                 Brak zdjęcia
             {% endif %}
         </td>
-
-
     </tr>
     {% endfor %}
-</tbody>
-
+    </tbody>
 </table>
 
-<!-- Overlay fullscreen -->
 <div id="imageOverlay" onclick="closeImage()">
     <img id="overlayImage" onclick="event.stopPropagation()">
 </div>
 
 <script>
-document.getElementById("resetLogsBtn").addEventListener("click", async function () {
+document.getElementById("resetLogsBtn").addEventListener("click", async () => {
     if (!confirm("Na pewno chcesz usunąć wszystkie logi?")) return;
-
-    try {
-        const response = await fetch("/admin/logs/reset", { method: "POST" });
-        if (response.ok) {
-            alert("Wszystkie logi zostały usunięte!");
-            const tbody = document.querySelector("#logsTable tbody");
-            while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-        } else {
-            alert("Nie udało się usunąć logów.");
-        }
-    } catch (err) {
-        console.error(err);
-        alert("Błąd połączenia z serwerem.");
+    const res = await fetch("/admin/logs/reset", { method: "POST" });
+    if (res.ok) {
+        document.querySelector("#logsTable tbody").innerHTML = "";
+        alert("Logi usunięte");
     }
 });
 
-// Overlay zdjęć
+// overlay
 function openImage(src) {
-    const overlay = document.getElementById("imageOverlay");
-    const img = document.getElementById("overlayImage");
-    img.src = src;
-    overlay.style.display = "flex";
-    document.body.style.overflow = "hidden";
+    overlayImage.src = src;
+    imageOverlay.style.display = "flex";
 }
-
 function closeImage() {
-    document.getElementById("imageOverlay").style.display = "none";
-    document.body.style.overflow = "auto";
+    imageOverlay.style.display = "none";
 }
 
-document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeImage();
-});
-
-// Filtry tabeli
+// FILTRY — POPRAWIONE
 const filterDate = document.getElementById("filterDate");
 const filterResult = document.getElementById("filterResult");
 const filterQR = document.getElementById("filterQR");
 
-[filterDate, filterResult, filterQR].forEach(el => el.addEventListener("change", applyFilters));
+[filterDate, filterResult, filterQR].forEach(el =>
+    el.addEventListener("change", applyFilters)
+);
 
 function applyFilters() {
-    const tbody = document.querySelector("#logsTable tbody");
-    const dateVal = filterDate.value.trim();
-    const resultVal = filterResult.value.trim().toLowerCase();
-    const qrVal = filterQR.value.trim().toLowerCase();
+    const rows = document.querySelectorAll("#logsTable tbody tr");
+    const dateVal = filterDate.value;
+    const resultVal = filterResult.value.toLowerCase();
+    const qrVal = filterQR.value.toLowerCase();
 
-    for (const row of tbody.rows) {
-        const dateText = row.cells[1].innerText.slice(0,10).trim(); // YYYY-MM-DD
-        const resultText = row.cells[2].dataset.result.trim().toLowerCase();
-        const qrText = row.cells[3].dataset.qr.trim().toLowerCase();
+    rows.forEach(row => {
+        const dateText = row.cells[1].innerText.slice(0, 10);
+        const qrText = row.cells[2].dataset.qr.toLowerCase();
+        const resultText = row.cells[3].dataset.result.toLowerCase();
 
         let show = true;
         if (dateVal && dateText !== dateVal) show = false;
-        if (resultVal && resultText !== resultVal) show = false;
         if (qrVal && qrText !== qrVal) show = false;
+        if (resultVal && resultText !== resultVal) show = false;
 
         row.style.display = show ? "" : "none";
-    }
+    });
 }
-
-
 </script>
 {% endblock %}

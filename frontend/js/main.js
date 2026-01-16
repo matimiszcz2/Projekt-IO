@@ -424,19 +424,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const statusEl = document.getElementById("status");
-
-    if (!QR_SCANNER_ENABLED) {
-        if (!CAMERA_ENABLED) {
-            if (!QR_SCANNER_ENABLED && !CAMERA_ENABLED) {
+    if (!QR_SCANNER_ENABLED && !CAMERA_ENABLED) {
                 statusEl.innerText = "Kamera i skaner QR są wyłączone";
                 statusEl.className = "error";
                 return; // koniec – nie startujemy kamery
             }
+    if (!CAMERA_ENABLED) {
+
             statusEl.innerText = "Kamera wyłączona w ustawieniach";
             statusEl.className = "info";
             document.getElementById(SCANNER_ID).style.background = "#555";
             return; // koniec – nie startujemy kamery
         }
+    if (!QR_SCANNER_ENABLED) {
+
         statusEl.innerText = "Skaner QR wyłączony w ustawieniach";
         statusEl.className = "info";
         return; // koniec – QR nie startuje
